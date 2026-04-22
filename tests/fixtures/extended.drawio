@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile version="21.0.0">
+
+  <!-- Page 1: various shape types -->
+  <diagram name="Shapes" id="diag1">
+    <mxGraphModel pageWidth="1169" pageHeight="827">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- Ellipse -->
+        <mxCell id="10" value="Ellipse"
+                style="ellipse;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;"
+                vertex="1" parent="1">
+          <mxGeometry x="50" y="50" width="140" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Diamond -->
+        <mxCell id="11" value="Decision"
+                style="rhombus;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;"
+                vertex="1" parent="1">
+          <mxGeometry x="250" y="50" width="120" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Parallelogram -->
+        <mxCell id="12" value="Input/Output"
+                style="shape=parallelogram;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;"
+                vertex="1" parent="1">
+          <mxGeometry x="430" y="50" width="140" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Triangle -->
+        <mxCell id="13" value="Triangle"
+                style="triangle;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;"
+                vertex="1" parent="1">
+          <mxGeometry x="630" y="50" width="100" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Cylinder -->
+        <mxCell id="14" value="Database"
+                style="shape=cylinder3;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;"
+                vertex="1" parent="1">
+          <mxGeometry x="800" y="40" width="100" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- Hexagon -->
+        <mxCell id="15" value="Hexagon"
+                style="shape=hexagon;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;"
+                vertex="1" parent="1">
+          <mxGeometry x="960" y="50" width="120" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Dashed connector -->
+        <mxCell id="20" value=""
+                style="endArrow=open;dashed=1;strokeColor=#666666;strokeWidth=2;"
+                edge="1" source="10" target="11" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="190" y="90" as="sourcePoint"/>
+            <mxPoint x="250" y="90" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Connector with waypoint -->
+        <mxCell id="21" value="flow"
+                style="endArrow=classic;startArrow=none;"
+                edge="1" source="11" target="12" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="370" y="90" as="sourcePoint"/>
+            <mxPoint x="430" y="80" as="targetPoint"/>
+            <Array as="points">
+              <mxPoint x="400" y="60"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Group: two children -->
+        <mxCell id="30" value="Group"
+                style="group;fillColor=none;strokeColor=#999999;dashed=1;"
+                vertex="1" parent="1">
+          <mxGeometry x="50" y="250" width="300" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="31" value="Child A"
+                style="fillColor=#fff2cc;strokeColor=#d6b656;"
+                vertex="1" parent="30">
+          <mxGeometry x="20" y="30" width="100" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="32" value="Child B"
+                style="fillColor=#d5e8d4;strokeColor=#82b366;"
+                vertex="1" parent="30">
+          <mxGeometry x="170" y="30" width="100" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Bold + italic text -->
+        <mxCell id="40" value="Bold Italic"
+                style="fillColor=#f5f5f5;strokeColor=#666666;fontStyle=3;fontSize=14;"
+                vertex="1" parent="1">
+          <mxGeometry x="400" y="250" width="160" height="60" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <!-- Page 2: simple flowchart -->
+  <diagram name="Flowchart" id="diag2">
+    <mxGraphModel pageWidth="1169" pageHeight="827">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="50" value="Start"
+                style="ellipse;fillColor=#d5e8d4;strokeColor=#82b366;"
+                vertex="1" parent="1">
+          <mxGeometry x="500" y="50" width="120" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="51" value="Process"
+                style="fillColor=#dae8fc;strokeColor=#6c8ebf;"
+                vertex="1" parent="1">
+          <mxGeometry x="480" y="180" width="160" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="52" value="End"
+                style="ellipse;fillColor=#f8cecc;strokeColor=#b85450;"
+                vertex="1" parent="1">
+          <mxGeometry x="500" y="320" width="120" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="53" value=""
+                style="endArrow=classic;" edge="1" source="50" target="51" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="560" y="110" as="sourcePoint"/>
+            <mxPoint x="560" y="180" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="54" value=""
+                style="endArrow=classic;" edge="1" source="51" target="52" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="560" y="250" as="sourcePoint"/>
+            <mxPoint x="560" y="320" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+</mxfile>
