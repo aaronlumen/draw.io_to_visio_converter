@@ -268,17 +268,37 @@ def _write_page_xml(zf: zipfile.ZipFile, page: Page, page_num: int) -> None:
     id_map: dict[str, int] = {}
     next_id = 1
 
+    shape_by_id: dict[str, "Shape"] = {}
     for shape in page.shapes:
         vid = next_id
         next_id += 1
         id_map[shape.id] = vid
+        shape_by_id[shape.id] = shape
         _add_shape_element(shapes_el, shape, vid, ph_in)
 
     for connector in page.connectors:
         vid = next_id
         next_id += 1
         id_map[connector.id] = vid
-        _add_connector_element(shapes_el, connector, vid, ph_in)
+
+        # A connector with source_id/target_id (the normal draw.io case - an
+        # edge glued to two vertices rather than free-floating points) has no
+        # explicit <mxPoint> in its own geometry, so the parser leaves
+        # start_x/y and end_x/y at their 0.0 default. Left as-is, every such
+        # connector becomes a literal zero-length line at (0,0): the Connects
+        # glue metadata is still correct, but there is no visible line -
+        # exactly the "no connectors between the boxes" symptom. Resolve the
+        # real endpoint from each referenced shape's center instead.
+        start_override = end_override = None
+        src_shape = shape_by_id.get(connector.source_id) if connector.source_id else None
+        tgt_shape = shape_by_id.get(connector.target_id) if connector.target_id else None
+        if src_shape is not None:
+            start_override = (src_shape.x + src_shape.width / 2, src_shape.y + src_shape.height / 2)
+        if tgt_shape is not None:
+            end_override = (tgt_shape.x + tgt_shape.width / 2, tgt_shape.y + tgt_shape.height / 2)
+
+        _add_connector_element(shapes_el, connector, vid, ph_in,
+                                start_override=start_override, end_override=end_override)
 
         # Glue connects
         src_vid = id_map.get(connector.source_id) if connector.source_id else None
@@ -402,18 +422,30 @@ def _add_connector_element(
     connector: Connector,
     vid: int,
     page_height_in: float,
+    start_override: tuple[float, float] | None = None,
+    end_override: tuple[float, float] | None = None,
 ) -> None:
-    """Append a <Shape> element for a connector/edge."""
+    """Append a <Shape> element for a connector/edge.
+
+    start_override/end_override (draw.io pixel coordinates) take precedence
+    over connector.start_x/y and end_x/y when given - see the call site in
+    _write_page_xml for why: an edge glued via source_id/target_id (the
+    normal case) has no explicit <mxPoint> of its own, so those attributes
+    are just the parser's 0.0 default and must not be used directly.
+    """
     def _tx(px: float) -> float:
         return px / PX_PER_INCH
 
     def _ty(py: float) -> float:
         return page_height_in - py / PX_PER_INCH
 
-    bx = _tx(connector.start_x)
-    by = _ty(connector.start_y)
-    ex = _tx(connector.end_x)
-    ey = _ty(connector.end_y)
+    start_px = start_override if start_override is not None else (connector.start_x, connector.start_y)
+    end_px = end_override if end_override is not None else (connector.end_x, connector.end_y)
+
+    bx = _tx(start_px[0])
+    by = _ty(start_px[1])
+    ex = _tx(end_px[0])
+    ey = _ty(end_px[1])
     waypoints = [(_tx(wp.x), _ty(wp.y)) for wp in connector.waypoints]
 
     s = _sub(parent, "Shape", ID=str(vid), Type="Shape",
