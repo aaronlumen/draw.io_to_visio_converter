@@ -89,11 +89,46 @@ python converter.py --help
 | Groups (parent-child cells) | Children resolved to absolute coordinates |
 | Compressed diagrams (web editor export) | Auto-detected and decompressed |
 
+## Stencils
+
+Render chosen shapes as masters from your own Visio stencil (`.vssx`/`.vsdx`)
+instead of plain inline geometry. You choose which elements map to which master.
+
+```bash
+python converter.py --list-masters network.vssx          # see master names
+
+# quick mapping on the command line (first matching rule wins)
+python converter.py in.drawio --stencil network.vssx \
+    --map 'label:^DB-=Database' --map 'style:mxgraph.cisco.routers=Router'
+
+# or a JSON rules file
+python converter.py in.drawio --stencil-map rules.json
+```
+
+`rules.json` (stencil paths are relative to the JSON file):
+
+```json
+{
+  "stencils": {"net": "network.vssx"},
+  "rules": [
+    {"match": {"style": "shape=mxgraph.cisco.routers.router"}, "stencil": "net", "master": "Router"},
+    {"match": {"label": "^DB-"}, "master": "Database"},
+    {"match": {"id": "abc123"},   "master": "Firewall"}
+  ]
+}
+```
+
+Match keys (all given keys must match): `style` (substring of any `key=value`),
+`label` (regex), `id` (exact draw.io cell id), `shape_type`. Omit `stencil` to
+search every loaded stencil. Unmatched shapes keep the default rendering; a
+master that can't be found produces a warning. Master instances keep position,
+size and text; geometry and styling come from the stencil. Embedded images and
+fonts inside stencil masters are not carried over.
+
 ## Not yet supported
 
 - Swimlanes
 - Embedded images
-- Visio masters / stencils
 - Custom line-end styles beyond classic, open, and block arrows
 
 ## Running the tests

@@ -58,6 +58,9 @@ class Shape:
     # Parsed raw style dict (kept for debugging / future extensions)
     style: dict = field(default_factory=dict)
 
+    # (stencil key, master name) when a stencil rule matched this shape
+    master_ref: Optional[tuple] = None
+
     # Child shape IDs (for groups; children store their own coords relative to page)
     children: list[str] = field(default_factory=list)
 

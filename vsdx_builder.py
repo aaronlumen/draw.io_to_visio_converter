@@ -28,6 +28,7 @@ from typing import Iterator
 
 from models import Connector, Diagram, Page, Shape
 from shape_geometry import connector_geometry, get_geometry
+from stencil import MasterBundle, REL_MASTERS, StencilConfig
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -58,22 +59,36 @@ _DEFAULT_PAGE_H_PX = 827.0
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def build_vsdx(diagram: Diagram, output_path: str | Path) -> None:
-    """Convert *diagram* to a VSDX file and write it to *output_path*."""
+def build_vsdx(
+    diagram: Diagram,
+    output_path: str | Path,
+    stencils: StencilConfig | None = None,
+) -> None:
+    """Convert *diagram* to a VSDX file and write it to *output_path*.
+
+    If *stencils* is given, shapes matched by its rules are emitted as
+    instances of the stencil masters instead of inline geometry.
+    """
     output_path = Path(output_path)
+    bundle = MasterBundle.from_diagram(diagram, stencils) if stencils else None
+    if not bundle:
+        bundle = None
+    master_ids = bundle.ids if bundle else {}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        _write_content_types(zf, len(diagram.pages))
+        _write_content_types(zf, len(diagram.pages), bundle)
         _write_root_rels(zf)
         _write_app_xml(zf)
         _write_core_xml(zf)
-        _write_document_xml(zf)
-        _write_document_rels(zf)
+        _write_document_xml(zf, bundle)
+        _write_document_rels(zf, bundle)
+        if bundle:
+            bundle.write_parts(zf)
         _write_windows_xml(zf)
         _write_pages_xml(zf, diagram.pages)
         _write_pages_rels(zf, len(diagram.pages))
         for idx, page in enumerate(diagram.pages, start=1):
-            _write_page_xml(zf, page, idx)
+            _write_page_xml(zf, page, idx, master_ids)
 
     output_path.write_bytes(buf.getvalue())
 
@@ -82,7 +97,8 @@ def build_vsdx(diagram: Diagram, output_path: str | Path) -> None:
 # OPC boilerplate parts
 # ---------------------------------------------------------------------------
 
-def _write_content_types(zf: zipfile.ZipFile, num_pages: int) -> None:
+def _write_content_types(zf: zipfile.ZipFile, num_pages: int,
+                         bundle: MasterBundle | None = None) -> None:
     ET.register_namespace("", _NS_TYPES)
     root = ET.Element(f"{{{_NS_TYPES}}}Types")
 
@@ -106,6 +122,9 @@ def _write_content_types(zf: zipfile.ZipFile, num_pages: int) -> None:
         _t("Override",
            PartName=f"/visio/pages/page{i}.xml",
            ContentType="application/vnd.ms-visio.page+xml")
+    if bundle:
+        for part, ctype in bundle.content_type_overrides():
+            _t("Override", PartName=part, ContentType=ctype)
     _t("Override",
        PartName="/docProps/app.xml",
        ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml")
@@ -158,7 +177,8 @@ def _write_core_xml(zf: zipfile.ZipFile) -> None:
     zf.writestr("docProps/core.xml", _to_xml(root))
 
 
-def _write_document_xml(zf: zipfile.ZipFile) -> None:
+def _write_document_xml(zf: zipfile.ZipFile,
+                        bundle: MasterBundle | None = None) -> None:
     ET.register_namespace("", _NS)
     root = ET.Element(f"{{{_NS}}}VisioDocument",
                       attrib={"xml:space": "preserve"})
@@ -193,15 +213,21 @@ def _write_document_xml(zf: zipfile.ZipFile) -> None:
     _sub(row, "Cell", N="Color", V="#000000")
     _sub(row, "Cell", N="Size", V="0.15277777777777776")
 
+    if bundle:
+        for extra in bundle.style_sheets():
+            style_sheets.append(extra)
+
     zf.writestr("visio/document.xml", _to_xml(root))
 
 
-def _write_document_rels(zf: zipfile.ZipFile) -> None:
+def _write_document_rels(zf: zipfile.ZipFile,
+                         bundle: MasterBundle | None = None) -> None:
     ET.register_namespace("", _NS_PKG_REL)
     root = ET.Element(f"{{{_NS_PKG_REL}}}Relationships")
     for rid, rtype, target in [
         ("rId1", _REL_PAGES,   "pages/pages.xml"),
         ("rId2", _REL_WINDOWS, "windows.xml"),
+        *([("rId3", REL_MASTERS, "masters/masters.xml")] if bundle else []),
     ]:
         ET.SubElement(root, f"{{{_NS_PKG_REL}}}Relationship",
                       Id=rid, Type=rtype, Target=target)
@@ -255,7 +281,8 @@ def _write_pages_rels(zf: zipfile.ZipFile, num_pages: int) -> None:
 # Per-page content
 # ---------------------------------------------------------------------------
 
-def _write_page_xml(zf: zipfile.ZipFile, page: Page, page_num: int) -> None:
+def _write_page_xml(zf: zipfile.ZipFile, page: Page, page_num: int,
+                    master_ids: dict | None = None) -> None:
     root = ET.Element(f"{{{_NS}}}PageContents",
                       attrib={"xml:space": "preserve"})
     shapes_el = _sub(root, "Shapes")
@@ -274,7 +301,8 @@ def _write_page_xml(zf: zipfile.ZipFile, page: Page, page_num: int) -> None:
         next_id += 1
         id_map[shape.id] = vid
         shape_by_id[shape.id] = shape
-        _add_shape_element(shapes_el, shape, vid, ph_in)
+        _add_shape_element(shapes_el, shape, vid, ph_in,
+                           (master_ids or {}).get(shape.master_ref))
 
     for connector in page.connectors:
         vid = next_id
@@ -331,14 +359,30 @@ def _add_shape_element(
     shape: Shape,
     vid: int,
     page_height_in: float,
+    master_id: int | None = None,
 ) -> None:
-    """Append a <Shape> element for a vertex shape."""
+    """Append a <Shape> element for a vertex shape.
+
+    With *master_id* the shape is an instance of a stencil master: only the
+    position, size and text are written; geometry and styling are inherited.
+    """
     w_in = shape.width  / PX_PER_INCH
     h_in = shape.height / PX_PER_INCH
     pin_x = (shape.x + shape.width  / 2) / PX_PER_INCH
     pin_y = page_height_in - (shape.y + shape.height / 2) / PX_PER_INCH
     loc_pin_x = w_in / 2
     loc_pin_y = h_in / 2
+
+    if master_id is not None:
+        s = _sub(parent, "Shape", ID=str(vid), Type="Shape",
+                 Master=str(master_id))
+        _cell(s, "PinX",   pin_x)
+        _cell(s, "PinY",   pin_y)
+        _cell(s, "Width",  w_in)
+        _cell(s, "Height", h_in)
+        if shape.label:
+            _sub(s, "Text").text = shape.label
+        return
 
     s = _sub(parent, "Shape", ID=str(vid), Type="Shape",
              LineStyle="0", FillStyle="0", TextStyle="0")
