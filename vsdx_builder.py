@@ -76,14 +76,14 @@ def build_vsdx(
     master_ids = bundle.ids if bundle else {}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        if bundle:
+            bundle.write_parts(zf)
         _write_content_types(zf, len(diagram.pages), bundle)
         _write_root_rels(zf)
         _write_app_xml(zf)
         _write_core_xml(zf)
         _write_document_xml(zf, bundle)
         _write_document_rels(zf, bundle)
-        if bundle:
-            bundle.write_parts(zf)
         _write_windows_xml(zf)
         _write_pages_xml(zf, diagram.pages)
         _write_pages_rels(zf, len(diagram.pages))
@@ -123,6 +123,8 @@ def _write_content_types(zf: zipfile.ZipFile, num_pages: int,
            PartName=f"/visio/pages/page{i}.xml",
            ContentType="application/vnd.ms-visio.page+xml")
     if bundle:
+        for ext, ctype in bundle.content_type_defaults():
+            _t("Default", Extension=ext, ContentType=ctype)
         for part, ctype in bundle.content_type_overrides():
             _t("Override", PartName=part, ContentType=ctype)
     _t("Override",

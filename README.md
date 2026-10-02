@@ -122,8 +122,10 @@ Match keys (all given keys must match): `style` (substring of any `key=value`),
 `label` (regex), `id` (exact draw.io cell id), `shape_type`. Omit `stencil` to
 search every loaded stencil. Unmatched shapes keep the default rendering; a
 master that can't be found produces a warning. Master instances keep position,
-size and text; geometry and styling come from the stencil. Embedded images and
-fonts inside stencil masters are not carried over.
+size and text; geometry and styling come from the stencil. Images embedded in
+masters (e.g. vendor EMF device art) are copied; stencil fonts are not. Only
+the XML-based formats (`.vssx`, `.vsdx`, `.vssm`) are readable; convert a
+legacy binary `.vss` by opening and re-saving it as `.vssx` in Visio.
 
 ## Not yet supported
 

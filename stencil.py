@@ -13,8 +13,8 @@ Rule match keys (all given keys must match):
     id          exact draw.io cell id
     shape_type  exact converter shape type (rectangle, ellipse, ...)
 
-Known limitations: master-level relationships (embedded images/OLE) and font
-tables of the source stencil are not carried over.
+Embedded master media (e.g. EMF images) is copied; font tables of the source
+stencil are not.  Legacy binary .vss files are not supported.
 """
 
 from __future__ import annotations
@@ -40,6 +40,11 @@ REL_MASTER = "http://schemas.microsoft.com/visio/2010/relationships/master"
 CT_MASTERS = "application/vnd.ms-visio.masters+xml"
 CT_MASTER = "application/vnd.ms-visio.master+xml"
 
+_MEDIA_TYPES = {
+    "emf": "image/x-emf", "wmf": "image/x-wmf", "png": "image/png",
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif",
+    "bmp": "image/bmp", "svg": "image/svg+xml", "tif": "image/tiff",
+}
 _STYLE_ATTRS = ("LineStyle", "FillStyle", "TextStyle")
 _STYLE_ID_STRIDE = 1000  # style-id offset per stencil, avoids clashes
 
@@ -62,6 +67,8 @@ class MasterInfo:
     name_u: str
     element: ET.Element          # the <Master> element from masters.xml
     content: ET.Element          # parsed masterN.xml (<MasterContents>)
+    # (rel id, rel type, part name in the source package) for embedded media
+    rels: list[tuple[str, str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -103,11 +110,24 @@ class Stencil:
                     posixpath.join("visio/masters", target))
                 if part not in names:
                     continue
+                m_rels: list[tuple[str, str, str]] = []
+                m_rels_part = posixpath.join(
+                    "visio/masters/_rels", posixpath.basename(part) + ".rels")
+                if m_rels_part in names:
+                    for rel in ET.fromstring(zf.read(m_rels_part)):
+                        if rel.get("TargetMode") == "External":
+                            continue
+                        tpart = posixpath.normpath(posixpath.join(
+                            "visio/masters", rel.get("Target", "")))
+                        if tpart in names:
+                            m_rels.append((rel.get("Id", ""),
+                                           rel.get("Type", ""), tpart))
                 st.masters.append(MasterInfo(
                     name=m_el.get("Name", ""),
                     name_u=m_el.get("NameU", m_el.get("Name", "")),
                     element=m_el,
                     content=ET.fromstring(zf.read(part)),
+                    rels=m_rels,
                 ))
 
             if "visio/document.xml" in names:
@@ -267,6 +287,7 @@ class MasterBundle:
         self.config = config
         self.ids: dict[tuple[str, str], int] = {}
         self._order: list[tuple[str, MasterInfo]] = []
+        self._media_exts: set[str] = set()
 
     @classmethod
     def from_diagram(cls, diagram: Diagram,
@@ -323,6 +344,7 @@ class MasterBundle:
         masters_root = ET.Element(f"{{{_NS}}}Masters")
         rels_root = ET.Element(f"{{{_NS_PKG_REL}}}Relationships")
 
+        sources: dict[str, zipfile.ZipFile] = {}
         for out_id, (key, m) in enumerate(self._order, start=1):
             off = self._offset(key)
             m_el = copy.deepcopy(m.element)
@@ -339,8 +361,32 @@ class MasterBundle:
             self._remap(content, off)
             zf.writestr(f"visio/masters/master{out_id}.xml", _xml(content))
 
+            if m.rels:
+                src = sources.get(key)
+                if src is None:
+                    src = sources[key] = zipfile.ZipFile(
+                        self.config.stencils[key].path)
+                m_rels = ET.Element(f"{{{_NS_PKG_REL}}}Relationships")
+                for rid, rtype, tpart in m.rels:
+                    media = f"visio/media/m{out_id}_{posixpath.basename(tpart)}"
+                    zf.writestr(media, src.read(tpart))
+                    self._media_exts.add(
+                        posixpath.splitext(tpart)[1].lstrip(".").lower())
+                    ET.SubElement(m_rels, f"{{{_NS_PKG_REL}}}Relationship",
+                                  Id=rid, Type=rtype,
+                                  Target="../media/" + posixpath.basename(media))
+                zf.writestr(f"visio/masters/_rels/master{out_id}.xml.rels",
+                            _xml(m_rels))
+        for src in sources.values():
+            src.close()
+
         zf.writestr("visio/masters/masters.xml", _xml(masters_root))
         zf.writestr("visio/masters/_rels/masters.xml.rels", _xml(rels_root))
+
+    def content_type_defaults(self) -> list[tuple[str, str]]:
+        """Default content types for media extensions (call after write_parts)."""
+        return [(e, _MEDIA_TYPES.get(e, "application/octet-stream"))
+                for e in sorted(self._media_exts)]
 
     def content_type_overrides(self) -> list[tuple[str, str]]:
         parts = [("/visio/masters/masters.xml", CT_MASTERS)]
@@ -350,6 +396,10 @@ class MasterBundle:
 
 
 def _xml(root: ET.Element) -> str:
+    # Serialise the root's namespace as the default one (no ns0: prefixes)
+    if root.tag.startswith("{"):
+        ET.register_namespace("", root.tag[1:].split("}")[0])
+    ET.register_namespace("r", _NS_R)
     ET.indent(root, space="  ")
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             + ET.tostring(root, encoding="unicode"))

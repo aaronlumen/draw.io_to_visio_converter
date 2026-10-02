@@ -43,6 +43,13 @@ def make_stencil(path: Path, names=("Router", "Database")) -> Path:
             zf.writestr(f"visio/masters/master{i}.xml",
                         f'<MasterContents xmlns="{NS}"><Shapes>'
                         f'<Shape ID="1" LineStyle="1"/></Shapes></MasterContents>')
+        zf.writestr("visio/media/image1.emf", b"EMFDATA")
+        zf.writestr("visio/masters/_rels/master1.xml.rels",
+                    '<Relationships xmlns="http://schemas.openxmlformats.org/'
+                    'package/2006/relationships"><Relationship Id="rId1" '
+                    'Type="http://schemas.openxmlformats.org/officeDocument/'
+                    '2006/relationships/image" Target="../media/image1.emf"/>'
+                    '</Relationships>')
     return path
 
 
@@ -150,3 +157,15 @@ def test_rules_file(stencil_path, diagram, tmp_path):
     cfg = StencilConfig()
     cfg.load_rules_file(rules)
     assert cfg.assign(diagram) >= 1
+
+
+def test_master_media_copied(stencil_path, diagram, tmp_path):
+    shape = diagram.pages[0].shapes[0]
+    cfg = StencilConfig()
+    cfg.add_stencil(stencil_path)
+    cfg.rules.append(parse_map_option(f"id:{shape.id}=Router"))
+    zf = _build(diagram, cfg, tmp_path)
+    assert zf.read("visio/media/m1_image1.emf") == b"EMFDATA"
+    rels = zf.read("visio/masters/_rels/master1.xml.rels").decode()
+    assert "../media/m1_image1.emf" in rels
+    assert 'Extension="emf"' in zf.read("[Content_Types].xml").decode()
