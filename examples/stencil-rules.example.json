@@ -1,8 +1,8 @@
 {
   "stencils": {"panw": "panw-vssx.vssx"},
   "rules": [
-    {"match": {"style": "strokeColor=#1a5276", "label": "(?i)^FW-CORE"}, "master": "PA-5450 Front"},
-    {"match": {"style": "strokeColor=#1a5276", "label": "(?i)^FW-EDGE"}, "master": "PA-850 Front"},
+    {"match": {"style": "strokeColor=#336699", "label": "(?i)^FW-CORE"}, "master": "PA-5450 Front"},
+    {"match": {"style": "strokeColor=#336699", "label": "(?i)^FW-EDGE"}, "master": "PA-850 Front"},
     {"match": {"id": "some-cell-id"}, "stencil": "panw", "master": "PA-440 Front"}
   ]
 }
