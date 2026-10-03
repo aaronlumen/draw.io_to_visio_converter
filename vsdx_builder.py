@@ -129,10 +129,16 @@ def _write_root_rels(zf: zipfile.ZipFile) -> None:
 
 
 def _write_app_xml(zf: zipfile.ZipFile) -> None:
+    # NOTE: must NOT use the _sub() helper here - it unconditionally
+    # namespaces unqualified tags into the Visio-main namespace (_NS), which
+    # previously put Application/AppVersion in the wrong namespace entirely
+    # (a schema-invalid docProps/app.xml that made LibreOffice's importer
+    # silently abort and render a blank page).
     ns = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
-    root = ET.Element("Properties", xmlns=ns)
-    _sub(root, "Application").text = "draw.io to VSDX Converter"
-    _sub(root, "AppVersion").text = "1.0"
+    ET.register_namespace("", ns)
+    root = ET.Element(f"{{{ns}}}Properties")
+    ET.SubElement(root, f"{{{ns}}}Application").text = "draw.io to VSDX Converter"
+    ET.SubElement(root, f"{{{ns}}}AppVersion").text = "1.0"
     zf.writestr("docProps/app.xml", _to_xml(root))
 
 
@@ -209,6 +215,12 @@ def _write_document_rels(zf: zipfile.ZipFile) -> None:
 
 
 def _write_windows_xml(zf: zipfile.ZipFile) -> None:
+    # See _write_pages_xml for why this re-registration is needed: earlier
+    # calls elsewhere that register "" for _NS_PKG_REL evict this module's
+    # "" -> _NS mapping (same prefix), so without re-asserting it here this
+    # part would serialize with an auto-generated "nsN:" prefix instead of
+    # the default namespace real Visio files use.
+    ET.register_namespace("", _NS)
     root = ET.Element(f"{{{_NS}}}Windows",
                       attrib={"ClientWidth": "1680", "ClientHeight": "985"})
     win = _sub(root, "Window", ID="0", WindowType="Drawing",
@@ -222,6 +234,18 @@ def _write_windows_xml(zf: zipfile.ZipFile) -> None:
 
 
 def _write_pages_xml(zf: zipfile.ZipFile, pages: list[Page]) -> None:
+    # Re-register right before serializing: ET.register_namespace(prefix, uri)
+    # deletes any existing mapping that shares the same prefix, so the
+    # _NS_PKG_REL registrations in _write_document_rels/_write_root_rels
+    # (both use prefix "") clobber this module's earlier "" -> _NS mapping
+    # by the time we get here. Without "r" registered for _NS_R, the Rel
+    # element's id attribute below gets an auto-generated "nsN" prefix
+    # instead of "r:" - which LibreOffice's Visio import filter fails to
+    # resolve (it matches "r:id" literally, not by namespace URI), so the
+    # Page -> page1.xml relationship silently doesn't resolve and the page
+    # renders blank.
+    ET.register_namespace("", _NS)
+    ET.register_namespace("r", _NS_R)
     root = ET.Element(f"{{{_NS}}}Pages",
                       attrib={"xml:space": "preserve"})
     for idx, page in enumerate(pages):
@@ -256,6 +280,15 @@ def _write_pages_rels(zf: zipfile.ZipFile, num_pages: int) -> None:
 # ---------------------------------------------------------------------------
 
 def _write_page_xml(zf: zipfile.ZipFile, page: Page, page_num: int) -> None:
+    # Re-register for the same reason as _write_pages_xml/_write_windows_xml:
+    # without it this part (the actual shape/connector content LibreOffice
+    # renders) serializes with an auto-generated "nsN:" prefix instead of
+    # the default namespace. Confirmed via bisection that LibreOffice's
+    # Visio import filter silently fails to recognize prefixed PageContents/
+    # Shapes/Shape/Connect elements and renders a blank page - it apparently
+    # matches tag names literally rather than resolving by namespace URI,
+    # same as the r:id issue in pages.xml.
+    ET.register_namespace("", _NS)
     root = ET.Element(f"{{{_NS}}}PageContents",
                       attrib={"xml:space": "preserve"})
     shapes_el = _sub(root, "Shapes")
@@ -268,17 +301,37 @@ def _write_page_xml(zf: zipfile.ZipFile, page: Page, page_num: int) -> None:
     id_map: dict[str, int] = {}
     next_id = 1
 
+    shape_by_id: dict[str, "Shape"] = {}
     for shape in page.shapes:
         vid = next_id
         next_id += 1
         id_map[shape.id] = vid
+        shape_by_id[shape.id] = shape
         _add_shape_element(shapes_el, shape, vid, ph_in)
 
     for connector in page.connectors:
         vid = next_id
         next_id += 1
         id_map[connector.id] = vid
-        _add_connector_element(shapes_el, connector, vid, ph_in)
+
+        # A connector with source_id/target_id (the normal draw.io case - an
+        # edge glued to two vertices rather than free-floating points) has no
+        # explicit <mxPoint> in its own geometry, so the parser leaves
+        # start_x/y and end_x/y at their 0.0 default. Left as-is, every such
+        # connector becomes a literal zero-length line at (0,0): the Connects
+        # glue metadata is still correct, but there is no visible line -
+        # exactly the "no connectors between the boxes" symptom. Resolve the
+        # real endpoint from each referenced shape's center instead.
+        start_override = end_override = None
+        src_shape = shape_by_id.get(connector.source_id) if connector.source_id else None
+        tgt_shape = shape_by_id.get(connector.target_id) if connector.target_id else None
+        if src_shape is not None:
+            start_override = (src_shape.x + src_shape.width / 2, src_shape.y + src_shape.height / 2)
+        if tgt_shape is not None:
+            end_override = (tgt_shape.x + tgt_shape.width / 2, tgt_shape.y + tgt_shape.height / 2)
+
+        _add_connector_element(shapes_el, connector, vid, ph_in,
+                                start_override=start_override, end_override=end_override)
 
         # Glue connects
         src_vid = id_map.get(connector.source_id) if connector.source_id else None
@@ -402,18 +455,30 @@ def _add_connector_element(
     connector: Connector,
     vid: int,
     page_height_in: float,
+    start_override: tuple[float, float] | None = None,
+    end_override: tuple[float, float] | None = None,
 ) -> None:
-    """Append a <Shape> element for a connector/edge."""
+    """Append a <Shape> element for a connector/edge.
+
+    start_override/end_override (draw.io pixel coordinates) take precedence
+    over connector.start_x/y and end_x/y when given - see the call site in
+    _write_page_xml for why: an edge glued via source_id/target_id (the
+    normal case) has no explicit <mxPoint> of its own, so those attributes
+    are just the parser's 0.0 default and must not be used directly.
+    """
     def _tx(px: float) -> float:
         return px / PX_PER_INCH
 
     def _ty(py: float) -> float:
         return page_height_in - py / PX_PER_INCH
 
-    bx = _tx(connector.start_x)
-    by = _ty(connector.start_y)
-    ex = _tx(connector.end_x)
-    ey = _ty(connector.end_y)
+    start_px = start_override if start_override is not None else (connector.start_x, connector.start_y)
+    end_px = end_override if end_override is not None else (connector.end_x, connector.end_y)
+
+    bx = _tx(start_px[0])
+    by = _ty(start_px[1])
+    ex = _tx(end_px[0])
+    ey = _ty(end_px[1])
     waypoints = [(_tx(wp.x), _ty(wp.y)) for wp in connector.waypoints]
 
     s = _sub(parent, "Shape", ID=str(vid), Type="Shape",
